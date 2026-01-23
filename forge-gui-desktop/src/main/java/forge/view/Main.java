@@ -53,7 +53,18 @@ public final class Main {
         //Turn on OpenGl acceleration to improve performance
         //System.setProperty("sun.java2d.opengl", "True");
 
-        //setup GUI interface
+        // command line startup here
+        String mode = args.length > 0 ? args[0].toLowerCase() : "";
+
+        // Use headless GUI for daemon mode
+        if ("daemon".equals(mode)) {
+            GuiBase.setInterface(new forge.GuiHeadless());
+            ForgeDaemon.startDaemon(args);
+            System.exit(0);
+            return;
+        }
+
+        // Setup desktop GUI interface for all other modes
         GuiBase.setInterface(new GuiDesktop());
 
         //install our error handler
@@ -67,9 +78,6 @@ public final class Main {
             Singletons.getControl().initialize();
             return;
         }
-
-        // command line startup here
-        String mode = args[0].toLowerCase();
 
         switch (mode) {
             case "sim":
@@ -85,7 +93,7 @@ public final class Main {
                 break;
 
             default:
-                System.out.println("Unknown mode.\nKnown mode is 'sim', 'parse' ");
+                System.out.println("Unknown mode.\nKnown modes: 'sim', 'daemon', 'parse' ");
                 break;
         }
 
