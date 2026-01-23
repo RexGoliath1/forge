@@ -6,6 +6,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import org.apache.commons.lang3.time.StopWatch;
+import forge.util.MyRandom;
 
 import forge.LobbyPlayer;
 import forge.deck.Deck;
@@ -16,6 +17,7 @@ import forge.game.GameEndReason;
 import forge.game.GameLogEntry;
 import forge.game.GameLogEntryType;
 import forge.game.GameRules;
+import forge.game.GameStateEventVisitor;
 import forge.game.GameType;
 import forge.game.Match;
 import forge.game.player.RegisteredPlayer;
@@ -80,6 +82,15 @@ public class SimulateMatch {
         }
 
         boolean outputGamelog = !params.containsKey("q");
+        boolean outputJsonState = params.containsKey("j");
+        boolean interactiveMode = params.containsKey("i");
+
+        // Set seed for deterministic replay if provided
+        if (params.containsKey("s")) {
+            long seed = Long.parseLong(params.get("s").get(0));
+            MyRandom.setRandom(new Random(seed));
+            System.out.println("SEED: " + seed);
+        }
 
         GameType type = GameType.Constructed;
         if (params.containsKey("f")) {
@@ -94,7 +105,7 @@ public class SimulateMatch {
         }
 
         if (params.containsKey("t")) {
-            simulateTournament(params, rules, outputGamelog);
+            simulateTournament(params, rules, outputGamelog, outputJsonState);
             System.out.flush();
             return;
         }
@@ -114,7 +125,8 @@ public class SimulateMatch {
                 if (i > 1) {
                     sb.append(" vs ");
                 }
-                String name = TextUtil.concatNoSpace("Ai(", String.valueOf(i), ")-", d.getName());
+                String prefix = interactiveMode ? "Agent" : "Ai";
+                String name = TextUtil.concatNoSpace(prefix, "(", String.valueOf(i), ")-", d.getName());
                 sb.append(name);
 
                 RegisteredPlayer rp;
@@ -124,7 +136,13 @@ public class SimulateMatch {
                 } else {
                     rp = new RegisteredPlayer(d);
                 }
-                rp.setPlayer(GamePlayerUtil.createAiPlayer(name, i - 1));
+
+                // Use external agent or AI based on mode
+                if (interactiveMode) {
+                    rp.setPlayer(new LobbyPlayerExternal(name));
+                } else {
+                    rp.setPlayer(GamePlayerUtil.createAiPlayer(name, i - 1));
+                }
                 pp.add(rp);
                 i++;
             }
@@ -144,12 +162,12 @@ public class SimulateMatch {
             int iGame = 0;
             while (!mc.isMatchOver()) {
                 // play games until the match ends
-                simulateSingleMatch(mc, iGame, outputGamelog);
+                simulateSingleMatch(mc, iGame, outputGamelog, outputJsonState);
                 iGame++;
             }
         } else {
             for (int iGame = 0; iGame < nGames; iGame++) {
-                simulateSingleMatch(mc, iGame, outputGamelog);
+                simulateSingleMatch(mc, iGame, outputGamelog, outputJsonState);
             }
         }
 
@@ -157,7 +175,7 @@ public class SimulateMatch {
     }
 
     private static void argumentHelp() {
-        System.out.println("Syntax: forge.exe sim -d <deck1[.dck]> ... <deckX[.dck]> -D [D] -n [N] -m [M] -t [T] -p [P] -f [F] -q");
+        System.out.println("Syntax: forge.exe sim -d <deck1[.dck]> ... <deckX[.dck]> -D [D] -n [N] -m [M] -t [T] -p [P] -f [F] -s [S] -q -j -i");
         System.out.println("\tsim - stands for simulation mode");
         System.out.println("\tdeck1 (or deck2,...,X) - constructed deck name or filename (has to be quoted when contains multiple words)");
         System.out.println("\tdeck is treated as file if it ends with a dot followed by three numbers or letters");
@@ -167,15 +185,32 @@ public class SimulateMatch {
         System.out.println("\tT - Type of tournament to run with all provided decks (Bracket, RoundRobin, Swiss)");
         System.out.println("\tP - Amount of players per match (used only with Tournaments, defaults to 2)");
         System.out.println("\tF - format of games, defaults to constructed");
+        System.out.println("\tS - Seed for deterministic replay. Use the same seed to reproduce exact game.");
         System.out.println("\tc - Clock flag. Set the maximum time in seconds before calling the match a draw, defaults to 120.");
         System.out.println("\tq - Quiet flag. Output just the game result, not the entire game log.");
+        System.out.println("\tj - JSON flag. Output game state as JSON lines for ML/RL training data.");
+        System.out.println("\ti - Interactive flag. External agents control players via stdin/stdout JSON protocol.");
     }
 
     public static void simulateSingleMatch(final Match mc, int iGame, boolean outputGamelog) {
+        simulateSingleMatch(mc, iGame, outputGamelog, false);
+    }
+
+    public static void simulateSingleMatch(final Match mc, int iGame, boolean outputGamelog, boolean outputJsonState) {
         final StopWatch sw = new StopWatch();
         sw.start();
 
         final Game g1 = mc.createGame();
+
+        // Set up JSON state logging if enabled
+        GameStateEventVisitor stateVisitor = null;
+        if (outputJsonState) {
+            stateVisitor = new GameStateEventVisitor(g1);
+            g1.subscribeToEvents(stateVisitor);
+            // Log initial game state
+            stateVisitor.getLogger().logState("game_start");
+        }
+
         // will run match in the same thread
         try {
             TimeLimitedCodeBlock.runWithTimeout(() -> {
@@ -214,7 +249,7 @@ public class SimulateMatch {
         }
     }
 
-    private static void simulateTournament(Map<String, List<String>> params, GameRules rules, boolean outputGamelog) {
+    private static void simulateTournament(Map<String, List<String>> params, GameRules rules, boolean outputGamelog, boolean outputJsonState) {
         String tournament = params.get("t").get(0);
         AbstractTournament tourney = null;
         int matchPlayers = params.containsKey("p") ? Integer.parseInt(params.get("p").get(0)) : 2;
@@ -310,7 +345,7 @@ public class SimulateMatch {
                 while (!mc.isMatchOver()) {
                     // play games until the match ends
                     try {
-                        simulateSingleMatch(mc, iGame, outputGamelog);
+                        simulateSingleMatch(mc, iGame, outputGamelog, outputJsonState);
                         iGame++;
                     } catch (Exception e) {
                         exceptions++;
@@ -348,10 +383,18 @@ public class SimulateMatch {
     private static Deck deckFromCommandLineParameter(String deckname, GameType type) {
         int dotpos = deckname.lastIndexOf('.');
         if (dotpos > 0 && dotpos == deckname.length() - 4) {
+            // First try as absolute path
+            File f = new File(deckname);
+            if (f.exists() && f.isFile()) {
+                System.out.println("Loading deck from: " + f.getAbsolutePath());
+                return DeckSerializer.fromFile(f);
+            }
+
+            // Then try in constructed deck directory
             String baseDir = type.equals(GameType.Commander) ?
                     ForgeConstants.DECK_COMMANDER_DIR : ForgeConstants.DECK_CONSTRUCTED_DIR;
 
-            File f = new File(baseDir + deckname);
+            f = new File(baseDir + deckname);
             if (!f.exists()) {
                 System.out.println("No deck found in " + baseDir);
             }
