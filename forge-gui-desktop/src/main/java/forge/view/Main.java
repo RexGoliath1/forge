@@ -64,6 +64,14 @@ public final class Main {
             return;
         }
 
+        // Use headless GUI for draft daemon mode
+        if ("draft".equals(mode)) {
+            GuiBase.setInterface(new forge.GuiHeadless());
+            ForgeDraftDaemon.startDaemon(args);
+            System.exit(0);
+            return;
+        }
+
         // Setup desktop GUI interface for all other modes
         GuiBase.setInterface(new GuiDesktop());
 
@@ -93,7 +101,7 @@ public final class Main {
                 break;
 
             default:
-                System.out.println("Unknown mode.\nKnown modes: 'sim', 'daemon', 'parse' ");
+                System.out.println("Unknown mode.\nKnown modes: 'sim', 'daemon', 'draft', 'parse' ");
                 break;
         }
 
