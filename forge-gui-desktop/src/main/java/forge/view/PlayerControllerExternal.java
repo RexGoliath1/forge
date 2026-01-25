@@ -47,6 +47,7 @@ import forge.game.trigger.WrappedAbility;
 import forge.game.zone.PlayerZone;
 import forge.game.zone.ZoneType;
 import forge.game.PlanarDice;
+import forge.ai.ComputerUtil;
 import forge.item.PaperCard;
 import forge.util.ITriggerEvent;
 import forge.util.collect.FCollectionView;
@@ -1209,13 +1210,15 @@ public class PlayerControllerExternal extends PlayerController {
             }
         }
 
-        // Also check for special actions like land plays
+        // Also check for special actions like land plays via LandAbility
         CardCollection lands = CardLists.filter(player.getCardsIn(ZoneType.Hand),
             card -> card.isLand() && player.canPlayLand(card, false, null));
         for (Card land : lands) {
-            SpellAbility landAbility = land.getFirstSpellAbility();
-            if (landAbility != null && !allPlayable.contains(landAbility)) {
-                allPlayable.add(landAbility);
+            // Look for LandAbility in the card's spell abilities
+            for (SpellAbility sa : land.getSpellAbilities()) {
+                if (sa.isLandAbility() && sa.canPlay() && !allPlayable.contains(sa)) {
+                    allPlayable.add(sa);
+                }
             }
         }
 
@@ -1276,6 +1279,14 @@ public class PlayerControllerExternal extends PlayerController {
 
     @Override
     public boolean playChosenSpellAbility(SpellAbility sa) {
+        // Actually execute the spell ability (like the AI does)
+        if (sa.isLandAbility()) {
+            if (sa.canPlay()) {
+                sa.resolve();
+            }
+        } else {
+            ComputerUtil.handlePlayingSpellAbility(player, sa, getGame());
+        }
         return true;
     }
 
