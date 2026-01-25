@@ -15,8 +15,8 @@ COPY forge-gui-desktop/target/forge-gui-desktop-*-jar-with-dependencies.jar forg
 # Copy resource files (cards, editions, etc.)
 COPY forge-gui/res ./res
 
-# Copy test decks
-COPY forge-gui/res/decks/constructed/*.dck ./res/decks/constructed/ 2>/dev/null || true
+# Copy test decks (optional - may not exist)
+COPY forge-gui/res/decks/constructed/ ./res/decks/constructed/
 
 # Environment variables
 ENV JAVA_OPTS="-Xmx2g -Djava.awt.headless=true"

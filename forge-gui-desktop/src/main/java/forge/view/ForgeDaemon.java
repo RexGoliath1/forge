@@ -136,16 +136,19 @@ public class ForgeDaemon {
     }
 
     private void handleNewGame(String command, BufferedReader in, PrintWriter out) {
-        // Parse command: NEWGAME deck1.dck deck2.dck [-i] [-q] [-c timeout] [-s seed]
+        // Parse command: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-s seed]
+        // -i = interactive (external agent controls)
+        // -o = observation (AI plays, decisions logged for training)
         String[] parts = command.split("\\s+");
         if (parts.length < 3) {
-            out.println("ERROR: Usage: NEWGAME deck1.dck deck2.dck [-i] [-q] [-c timeout] [-s seed]");
+            out.println("ERROR: Usage: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-s seed]");
             return;
         }
 
         String deck1 = parts[1];
         String deck2 = parts[2];
         boolean interactive = false;
+        boolean observe = false;
         boolean quiet = false;
         int timeout = 120;
         Long seed = null;
@@ -153,6 +156,8 @@ public class ForgeDaemon {
         for (int i = 3; i < parts.length; i++) {
             if (parts[i].equals("-i")) {
                 interactive = true;
+            } else if (parts[i].equals("-o")) {
+                observe = true;
             } else if (parts[i].equals("-q")) {
                 quiet = true;
             } else if (parts[i].equals("-c") && i + 1 < parts.length) {
@@ -164,7 +169,7 @@ public class ForgeDaemon {
 
         activeGames.incrementAndGet();
         try {
-            runGame(deck1, deck2, interactive, quiet, timeout, seed, in, out);
+            runGame(deck1, deck2, interactive, observe, quiet, timeout, seed, in, out);
         } finally {
             activeGames.decrementAndGet();
             totalGamesPlayed.incrementAndGet();
@@ -175,6 +180,7 @@ public class ForgeDaemon {
         String deck1Name,
         String deck2Name,
         boolean interactive,
+        boolean observe,
         boolean quiet,
         int timeout,
         Long seed,
@@ -208,17 +214,30 @@ public class ForgeDaemon {
 
         List<RegisteredPlayer> players = new ArrayList<>();
 
-        String prefix = interactive ? "Agent" : "Ai";
+        // Determine player type:
+        // -i = interactive (external agent controls)
+        // -o = observe (AI plays, decisions logged)
+        // neither = pure AI (no output)
+        String prefix = interactive ? "Agent" : (observe ? "AiObs" : "Ai");
+
         RegisteredPlayer rp1 = new RegisteredPlayer(d1);
-        rp1.setPlayer(interactive
-            ? new LobbyPlayerDaemon(prefix + "(1)-" + d1.getName(), in, out)
-            : GamePlayerUtil.createAiPlayer(prefix + "(1)-" + d1.getName(), 0));
+        if (interactive) {
+            rp1.setPlayer(new LobbyPlayerDaemon(prefix + "(1)-" + d1.getName(), in, out));
+        } else if (observe) {
+            rp1.setPlayer(new LobbyPlayerAiObserver(prefix + "(1)-" + d1.getName(), in, out));
+        } else {
+            rp1.setPlayer(GamePlayerUtil.createAiPlayer(prefix + "(1)-" + d1.getName(), 0));
+        }
         players.add(rp1);
 
         RegisteredPlayer rp2 = new RegisteredPlayer(d2);
-        rp2.setPlayer(interactive
-            ? new LobbyPlayerDaemon(prefix + "(2)-" + d2.getName(), in, out)
-            : GamePlayerUtil.createAiPlayer(prefix + "(2)-" + d2.getName(), 1));
+        if (interactive) {
+            rp2.setPlayer(new LobbyPlayerDaemon(prefix + "(2)-" + d2.getName(), in, out));
+        } else if (observe) {
+            rp2.setPlayer(new LobbyPlayerAiObserver(prefix + "(2)-" + d2.getName(), in, out));
+        } else {
+            rp2.setPlayer(GamePlayerUtil.createAiPlayer(prefix + "(2)-" + d2.getName(), 1));
+        }
         players.add(rp2);
 
         if (!quiet) {
