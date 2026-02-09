@@ -4,12 +4,14 @@ import java.io.BufferedReader;
 import java.io.PrintStream;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 import forge.LobbyPlayer;
 import forge.ai.PlayerControllerAi;
 import forge.game.Game;
 import forge.game.card.Card;
 import forge.game.card.CardCollection;
+import forge.game.card.CounterType;
 import forge.game.combat.Combat;
 import forge.game.combat.CombatUtil;
 import forge.game.player.Player;
@@ -263,14 +265,30 @@ public class PlayerControllerAiObserver extends PlayerControllerAi {
 
     private void appendPlayerState(StringBuilder json, Player p) {
         json.append("{");
+
+        // Basic info
         json.append("\"name\":\"").append(escapeString(p.getName())).append("\"");
         json.append(",\"life\":").append(p.getLife());
+        json.append(",\"poison\":").append(p.getPoisonCounters());
+        json.append(",\"has_lost\":").append(p.hasLost());
         json.append(",\"lands_played_this_turn\":").append(p.getLandsPlayedThisTurn());
         json.append(",\"max_land_plays\":").append(p.getMaxLandPlays());
-        json.append(",\"hand_size\":").append(p.getCardsIn(ZoneType.Hand).size());
+
+        // Library size (hidden info - don't expose contents)
         json.append(",\"library_size\":").append(p.getCardsIn(ZoneType.Library).size());
 
-        // Battlefield summary
+        // Hand - full card data
+        json.append(",\"hand_size\":").append(p.getCardsIn(ZoneType.Hand).size());
+        json.append(",\"hand\":[");
+        boolean first = true;
+        for (Card c : p.getCardsIn(ZoneType.Hand)) {
+            if (!first) json.append(",");
+            first = false;
+            appendCardDetails(json, c);
+        }
+        json.append("]");
+
+        // Battlefield - full card data with battlefield-specific fields
         int creatures = 0, lands = 0, other = 0;
         for (Card c : p.getCardsIn(ZoneType.Battlefield)) {
             if (c.isCreature()) creatures++;
@@ -280,11 +298,129 @@ public class PlayerControllerAiObserver extends PlayerControllerAi {
         json.append(",\"battlefield_creatures\":").append(creatures);
         json.append(",\"battlefield_lands\":").append(lands);
         json.append(",\"battlefield_other\":").append(other);
+        json.append(",\"battlefield\":[");
+        first = true;
+        for (Card c : p.getCardsIn(ZoneType.Battlefield)) {
+            if (!first) json.append(",");
+            first = false;
+            appendBattlefieldCard(json, c);
+        }
+        json.append("]");
+
+        // Graveyard - full card data
+        json.append(",\"graveyard\":[");
+        first = true;
+        for (Card c : p.getCardsIn(ZoneType.Graveyard)) {
+            if (!first) json.append(",");
+            first = false;
+            appendCardDetails(json, c);
+        }
+        json.append("]");
+
+        // Exile - full card data
+        json.append(",\"exile\":[");
+        first = true;
+        for (Card c : p.getCardsIn(ZoneType.Exile)) {
+            if (!first) json.append(",");
+            first = false;
+            appendCardDetails(json, c);
+        }
+        json.append("]");
 
         // Mana pool
         json.append(",\"mana_pool\":{");
         json.append("\"total\":").append(p.getManaPool().totalMana());
         json.append("}");
+
+        json.append("}");
+    }
+
+    /**
+     * Serialize a card with identity fields common to all zones.
+     * Used for hand, graveyard, and exile zones.
+     */
+    private void appendCardDetails(StringBuilder json, Card c) {
+        json.append("{");
+        json.append("\"id\":").append(c.getId());
+        json.append(",\"name\":\"").append(escapeString(c.getName())).append("\"");
+        json.append(",\"cmc\":").append(c.getCMC());
+
+        // Type flags
+        json.append(",\"is_creature\":").append(c.isCreature());
+        json.append(",\"is_land\":").append(c.isLand());
+        json.append(",\"is_artifact\":").append(c.isArtifact());
+        json.append(",\"is_enchantment\":").append(c.isEnchantment());
+        json.append(",\"is_planeswalker\":").append(c.isPlaneswalker());
+        json.append(",\"is_instant\":").append(c.isInstant());
+        json.append(",\"is_sorcery\":").append(c.isSorcery());
+
+        // Power/toughness (0 for non-creatures)
+        json.append(",\"power\":").append(c.isCreature() ? c.getNetPower() : 0);
+        json.append(",\"toughness\":").append(c.isCreature() ? c.getNetToughness() : 0);
+
+        // Oracle text for mechanics parsing
+        json.append(",\"oracle_text\":\"").append(escapeString(
+            c.getOracleText() != null ? c.getOracleText() : "")).append("\"");
+
+        json.append("}");
+    }
+
+    /**
+     * Serialize a battlefield card with additional state fields.
+     * Includes tapped, summoning sickness, counters, damage, loyalty.
+     */
+    private void appendBattlefieldCard(StringBuilder json, Card c) {
+        json.append("{");
+        json.append("\"id\":").append(c.getId());
+        json.append(",\"name\":\"").append(escapeString(c.getName())).append("\"");
+        json.append(",\"cmc\":").append(c.getCMC());
+
+        // Type flags
+        json.append(",\"is_creature\":").append(c.isCreature());
+        json.append(",\"is_land\":").append(c.isLand());
+        json.append(",\"is_artifact\":").append(c.isArtifact());
+        json.append(",\"is_enchantment\":").append(c.isEnchantment());
+        json.append(",\"is_planeswalker\":").append(c.isPlaneswalker());
+        json.append(",\"is_instant\":").append(c.isInstant());
+        json.append(",\"is_sorcery\":").append(c.isSorcery());
+
+        // Power/toughness (0 for non-creatures)
+        json.append(",\"power\":").append(c.isCreature() ? c.getNetPower() : 0);
+        json.append(",\"toughness\":").append(c.isCreature() ? c.getNetToughness() : 0);
+
+        // Oracle text for mechanics parsing
+        json.append(",\"oracle_text\":\"").append(escapeString(
+            c.getOracleText() != null ? c.getOracleText() : "")).append("\"");
+
+        // Battlefield-specific state
+        json.append(",\"tapped\":").append(c.isTapped());
+        json.append(",\"summoningSickness\":").append(c.hasSickness());
+
+        // Damage (for creatures)
+        if (c.isCreature()) {
+            json.append(",\"damage\":").append(c.getDamage());
+        }
+
+        // Loyalty (for planeswalkers)
+        if (c.isPlaneswalker()) {
+            json.append(",\"loyalty\":").append(c.getCurrentLoyalty());
+        }
+
+        // Counters as array of {type, count} objects
+        if (c.hasCounters()) {
+            json.append(",\"counters\":[");
+            boolean counterFirst = true;
+            for (Map.Entry<CounterType, Integer> entry : c.getCounters().entrySet()) {
+                if (entry.getValue() != null && entry.getValue() > 0) {
+                    if (!counterFirst) json.append(",");
+                    counterFirst = false;
+                    json.append("{\"type\":\"").append(escapeString(
+                        entry.getKey().getName().toLowerCase())).append("\"");
+                    json.append(",\"count\":").append(entry.getValue()).append("}");
+                }
+            }
+            json.append("]");
+        }
 
         json.append("}");
     }
