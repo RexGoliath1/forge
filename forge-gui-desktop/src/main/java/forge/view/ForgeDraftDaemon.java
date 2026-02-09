@@ -14,7 +14,6 @@ import java.net.*;
 import java.util.*;
 
 import forge.deck.CardPool;
-import forge.deck.Deck;
 import forge.deck.DeckSection;
 import forge.gamemodes.limited.*;
 import forge.item.PaperCard;
