@@ -219,7 +219,13 @@ public final class GameOutcome implements Iterable<Entry<RegisteredPlayer, Playe
     }
 
     public String getOutcomeString(RegisteredPlayer player) {
-        return playerNames.get(player) + " " + playerRating.get(player).getOutcome();
+        String name = playerNames.get(player);
+        if (name == null) name = "Unknown";
+        PlayerStatistics stats = playerRating.get(player);
+        if (stats == null || stats.getOutcome() == null) {
+            return name + " (no outcome)";
+        }
+        return name + " " + stats.getOutcome();
     }
 
     public void addAnteWon(RegisteredPlayer pl, List<PaperCard> cards) {
