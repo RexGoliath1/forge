@@ -21,6 +21,7 @@ import forge.card.mana.ManaCost;
 import forge.game.card.Card;
 import forge.game.card.CardState;
 import forge.game.cost.Cost;
+import forge.game.player.Player;
 
 /**
  * <p>
@@ -61,6 +62,14 @@ public abstract class AbilityStatic extends Ability implements Cloneable {
         // Initial usage is Karlov Watchdog preventing disguise/morph/cloak/manifest turning face up
         if (this.isTurnFaceUp() && !c.canBeTurnedFaceUp()) {
             return false;
+        }
+
+        Player player = getActivatingPlayer();
+        if (player == null) {
+            player = c.getController();
+            if (player != null) {
+                setActivatingPlayer(player);
+            }
         }
 
         return this.getRestrictions().canPlay(c, this);

@@ -86,6 +86,7 @@ public abstract class Spell extends SpellAbility implements java.io.Serializable
             if (activator == null) {
             	return null;
             }
+            this.setActivatingPlayer(activator);
         }
 
         final Game game = activator.getGame();

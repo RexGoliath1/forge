@@ -79,6 +79,9 @@ public abstract class AbilityActivated extends SpellAbility implements Cloneable
         Player player = getActivatingPlayer();
         if (player == null) {
             player = this.getHostCard().getController();
+            if (player != null) {
+                setActivatingPlayer(player);
+            }
         }
         
         final Game game = player.getGame();
