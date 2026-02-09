@@ -142,44 +142,16 @@ public class ForgeDaemon {
     }
 
     private void handleNewGame(String command, BufferedReader in, PrintWriter out) {
-        // Parse command: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-t ai_timeout] [-s seed]
-        // -i = interactive (external agent controls)
-        // -o = observation (AI plays, decisions logged for training)
-        // -t = per-decision AI timeout in seconds (default 5)
-        String[] parts = command.split("\\s+");
-        if (parts.length < 3) {
+        ParsedGameCommand parsed = parseNewGameCommand(command);
+        if (parsed == null) {
             out.println("ERROR: Usage: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-t ai_timeout] [-s seed]");
             return;
         }
 
-        String deck1 = parts[1];
-        String deck2 = parts[2];
-        boolean interactive = false;
-        boolean observe = false;
-        boolean quiet = false;
-        int timeout = 120;
-        int aiTimeout = 5;  // per-decision AI timeout (seconds)
-        Long seed = null;
-
-        for (int i = 3; i < parts.length; i++) {
-            if (parts[i].equals("-i")) {
-                interactive = true;
-            } else if (parts[i].equals("-o")) {
-                observe = true;
-            } else if (parts[i].equals("-q")) {
-                quiet = true;
-            } else if (parts[i].equals("-c") && i + 1 < parts.length) {
-                timeout = Integer.parseInt(parts[++i]);
-            } else if (parts[i].equals("-t") && i + 1 < parts.length) {
-                aiTimeout = Integer.parseInt(parts[++i]);
-            } else if (parts[i].equals("-s") && i + 1 < parts.length) {
-                seed = Long.parseLong(parts[++i]);
-            }
-        }
-
         activeGames.incrementAndGet();
         try {
-            runGame(deck1, deck2, interactive, observe, quiet, timeout, aiTimeout, seed, in, out);
+            runGame(parsed.deck1, parsed.deck2, parsed.interactive, parsed.observe,
+                    parsed.quiet, parsed.timeout, parsed.aiTimeout, parsed.seed, in, out);
         } finally {
             activeGames.decrementAndGet();
             totalGamesPlayed.incrementAndGet();
@@ -361,6 +333,72 @@ public class ForgeDaemon {
             gameExecutor.shutdownNow();
         }
         System.out.println("Daemon stopped. Total games: " + totalGamesPlayed.get());
+    }
+
+    /**
+     * Parsed representation of a NEWGAME command.
+     * Package-visible for testability.
+     */
+    static class ParsedGameCommand {
+        final String deck1;
+        final String deck2;
+        final boolean interactive;
+        final boolean observe;
+        final boolean quiet;
+        final int timeout;
+        final int aiTimeout;
+        final Long seed;
+
+        ParsedGameCommand(String deck1, String deck2, boolean interactive, boolean observe,
+                          boolean quiet, int timeout, int aiTimeout, Long seed) {
+            this.deck1 = deck1;
+            this.deck2 = deck2;
+            this.interactive = interactive;
+            this.observe = observe;
+            this.quiet = quiet;
+            this.timeout = timeout;
+            this.aiTimeout = aiTimeout;
+            this.seed = seed;
+        }
+    }
+
+    /**
+     * Parse a NEWGAME command string into its component parts.
+     * Returns null if the command is malformed (fewer than 3 parts).
+     * Package-visible for testability.
+     */
+    static ParsedGameCommand parseNewGameCommand(String command) {
+        String[] parts = command.split("\\s+");
+        if (parts.length < 3) {
+            return null;
+        }
+
+        String deck1 = parts[1];
+        String deck2 = parts[2];
+        boolean interactive = false;
+        boolean observe = false;
+        boolean quiet = false;
+        int timeout = 120;
+        int aiTimeout = 5;
+        Long seed = null;
+
+        for (int i = 3; i < parts.length; i++) {
+            if (parts[i].equals("-i")) {
+                interactive = true;
+            } else if (parts[i].equals("-o")) {
+                observe = true;
+            } else if (parts[i].equals("-q")) {
+                quiet = true;
+            } else if (parts[i].equals("-c") && i + 1 < parts.length) {
+                timeout = Integer.parseInt(parts[++i]);
+            } else if (parts[i].equals("-t") && i + 1 < parts.length) {
+                aiTimeout = Integer.parseInt(parts[++i]);
+            } else if (parts[i].equals("-s") && i + 1 < parts.length) {
+                seed = Long.parseLong(parts[++i]);
+            }
+        }
+
+        return new ParsedGameCommand(deck1, deck2, interactive, observe, quiet, timeout, aiTimeout, seed);
     }
 
     // Entry point
