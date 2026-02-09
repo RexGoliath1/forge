@@ -1,0 +1,95 @@
+# syntax=docker/dockerfile:1
+# Forge Daemon Base Image
+# Builds the Forge MTG engine JAR and packages it with minimal runtime deps.
+# This image is built by Forge CI and pushed to GHCR. mtg-rl consumes it
+# as a base image, adding decks, JVM tuning, and healthchecks on top.
+#
+# Build: docker build -f Dockerfile.daemon-base -t forge-daemon-base .
+# Push:  Handled by .github/workflows/docker-publish.yml
+
+# ==============================================================================
+# Stage 1: Build Forge JAR
+# ==============================================================================
+FROM maven:3.9-eclipse-temurin-17 AS builder
+
+WORKDIR /build
+
+COPY . .
+
+# Remove problematic plugins that fail in headless Docker builds
+RUN perl -i -0777 -pe 's/<plugin>\s*<groupId>com\.akathist\.maven\.plugins\.launch4j<\/groupId>.*?<\/plugin>//gs' \
+      forge-gui-desktop/pom.xml && \
+    perl -i -0777 -pe 's/<plugin>\s*<groupId>se\.bjurr\.gitchangelog<\/groupId>.*?<\/plugin>//gs' \
+      forge-gui-desktop/pom.xml
+
+# Maven build with optimizations:
+#   - BuildKit cache mount: reuses ~/.m2/repository across builds
+#   - Parallel build (-T 1C): one thread per CPU core
+#   - Positive module selection (-pl forge-gui-desktop -am): builds only what we need
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn package -DskipTests \
+      -T 1C \
+      -pl forge-gui-desktop \
+      -am \
+      -Dmaven.javadoc.skip=true \
+      -Dcheckstyle.skip=true
+
+# Locate the built JAR
+RUN find /build -name "forge-gui-desktop-*-jar-with-dependencies.jar" -exec cp {} /build/forge.jar \;
+
+# ==============================================================================
+# Stage 2: Minimal Runtime
+# ==============================================================================
+FROM eclipse-temurin:17-jre
+
+LABEL maintainer="Forge RL Integration"
+LABEL description="Forge MTG daemon base image (JAR + essential resources)"
+LABEL org.opencontainers.image.source=https://github.com/RexGoliath1/forge
+
+# Xvfb required — Forge initializes AWT even in daemon mode
+RUN apt-get update && apt-get install -y --no-install-recommends xvfb \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /forge
+
+# Create required directories
+RUN mkdir -p /forge/res \
+    /forge/userdata/decks/constructed \
+    /forge/userdata/decks/commander \
+    /forge/cache \
+    /forge/logs
+
+# Copy the built JAR
+COPY --from=builder /build/forge.jar /forge/forge.jar
+
+# Only copy daemon-essential res/ subdirectories (~155 MB, not full 393 MB)
+# Excludes: adventure(134MB), skins(18MB), music(16MB), quest(16MB),
+#           most of languages(45MB), conquest(5MB), effects(1.6MB), fonts, sound, tutorial, puzzle
+# NOTE: en-US language bundle is REQUIRED for Forge Localizer initialization
+COPY --from=builder /build/forge-gui/res/languages/en-US.properties /forge/res/languages/en-US.properties
+COPY --from=builder /build/forge-gui/res/cardsfolder/ /forge/res/cardsfolder/
+COPY --from=builder /build/forge-gui/res/editions/ /forge/res/editions/
+COPY --from=builder /build/forge-gui/res/tokenscripts/ /forge/res/tokenscripts/
+COPY --from=builder /build/forge-gui/res/ai/ /forge/res/ai/
+COPY --from=builder /build/forge-gui/res/blockdata/ /forge/res/blockdata/
+COPY --from=builder /build/forge-gui/res/draft/ /forge/res/draft/
+COPY --from=builder /build/forge-gui/res/formats/ /forge/res/formats/
+COPY --from=builder /build/forge-gui/res/lists/ /forge/res/lists/
+COPY --from=builder /build/forge-gui/res/defaults/ /forge/res/defaults/
+COPY --from=builder /build/forge-gui/res/setlookup/ /forge/res/setlookup/
+COPY --from=builder /build/forge-gui/res/sealed/ /forge/res/sealed/
+COPY --from=builder /build/forge-gui/res/cube/ /forge/res/cube/
+COPY --from=builder /build/forge-gui/res/deckgendecks/ /forge/res/deckgendecks/
+COPY --from=builder /build/forge-gui/res/geneticaidecks/ /forge/res/geneticaidecks/
+COPY --from=builder /build/forge-gui/res/licenses/ /forge/res/licenses/
+RUN mkdir -p /forge/res/decks/
+
+# Create forge profile properties
+RUN echo "userDir=/forge/userdata/" > /forge/forge.profile.properties \
+    && echo "cacheDir=/forge/cache/" >> /forge/forge.profile.properties \
+    && echo "decksDir=/forge/userdata/decks/" >> /forge/forge.profile.properties \
+    && echo "decksConstructedDir=/forge/userdata/decks/constructed/" >> /forge/forge.profile.properties
+
+# WORKAROUND: Forge SNAPSHOT builds look for assets at ../forge-gui/
+# Create symlink so /forge/../forge-gui points to /forge
+RUN ln -s /forge /forge-gui

@@ -1,0 +1,42 @@
+name: Build and Push Daemon Base Image
+
+on:
+  push:
+    branches: [feature/rl-daemon-mode]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase owner for GHCR tags
+        id: owner
+        run: echo "name=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Build and push base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.daemon-base
+          push: true
+          tags: |
+            ghcr.io/${{ steps.owner.outputs.name }}/forge-daemon-base:${{ github.sha }}
+            ghcr.io/${{ steps.owner.outputs.name }}/forge-daemon-base:latest
+          cache-from: type=gha,scope=daemon-base
+          cache-to: type=gha,mode=max,scope=daemon-base
