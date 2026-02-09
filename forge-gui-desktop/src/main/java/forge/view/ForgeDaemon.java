@@ -33,6 +33,12 @@ import forge.util.MyRandom;
  * Protocol:
  * - Connect to TCP port (default 17171)
  * - Send: NEWGAME deck1.dck deck2.dck [options]
+ *     -i           interactive (external agent controls)
+ *     -o           observation (AI plays, decisions logged)
+ *     -q           quiet (minimal output)
+ *     -c timeout   overall game timeout in seconds (default 120)
+ *     -t timeout   per-decision AI timeout in seconds (default 5)
+ *     -s seed      random seed for deterministic replay
  * - Receive: Game output (same as interactive mode)
  * - Send: Decision responses
  * - Connection closes when game ends
@@ -80,7 +86,7 @@ public class ForgeDaemon {
             System.out.println();
             System.out.println("To connect: nc localhost " + port);
             System.out.println("Commands:");
-            System.out.println("  NEWGAME deck1.dck deck2.dck [-i] [-q] [-c timeout] [-s seed]");
+            System.out.println("  NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-t ai_timeout] [-s seed]");
             System.out.println("  STATUS");
             System.out.println("  SHUTDOWN");
             System.out.println("=".repeat(60));
@@ -136,12 +142,13 @@ public class ForgeDaemon {
     }
 
     private void handleNewGame(String command, BufferedReader in, PrintWriter out) {
-        // Parse command: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-s seed]
+        // Parse command: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-t ai_timeout] [-s seed]
         // -i = interactive (external agent controls)
         // -o = observation (AI plays, decisions logged for training)
+        // -t = per-decision AI timeout in seconds (default 5)
         String[] parts = command.split("\\s+");
         if (parts.length < 3) {
-            out.println("ERROR: Usage: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-s seed]");
+            out.println("ERROR: Usage: NEWGAME deck1.dck deck2.dck [-i] [-o] [-q] [-c timeout] [-t ai_timeout] [-s seed]");
             return;
         }
 
@@ -151,6 +158,7 @@ public class ForgeDaemon {
         boolean observe = false;
         boolean quiet = false;
         int timeout = 120;
+        int aiTimeout = 5;  // per-decision AI timeout (seconds)
         Long seed = null;
 
         for (int i = 3; i < parts.length; i++) {
@@ -162,6 +170,8 @@ public class ForgeDaemon {
                 quiet = true;
             } else if (parts[i].equals("-c") && i + 1 < parts.length) {
                 timeout = Integer.parseInt(parts[++i]);
+            } else if (parts[i].equals("-t") && i + 1 < parts.length) {
+                aiTimeout = Integer.parseInt(parts[++i]);
             } else if (parts[i].equals("-s") && i + 1 < parts.length) {
                 seed = Long.parseLong(parts[++i]);
             }
@@ -169,7 +179,7 @@ public class ForgeDaemon {
 
         activeGames.incrementAndGet();
         try {
-            runGame(deck1, deck2, interactive, observe, quiet, timeout, seed, in, out);
+            runGame(deck1, deck2, interactive, observe, quiet, timeout, aiTimeout, seed, in, out);
         } finally {
             activeGames.decrementAndGet();
             totalGamesPlayed.incrementAndGet();
@@ -183,6 +193,7 @@ public class ForgeDaemon {
         boolean observe,
         boolean quiet,
         int timeout,
+        int aiTimeout,
         Long seed,
         BufferedReader in,
         PrintWriter out
@@ -246,6 +257,9 @@ public class ForgeDaemon {
 
         Match match = new Match(rules, players, "DaemonGame");
         Game game = match.createGame();
+
+        // Wire per-decision AI timeout from -t flag (default 5s)
+        game.AI_TIMEOUT = aiTimeout;
 
         long startTime = System.currentTimeMillis();
 
