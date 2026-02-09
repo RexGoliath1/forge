@@ -1607,10 +1607,16 @@ public class AiController {
         // in case of infinite loop reset below would not be reached
         timeoutReached = false;
 
+        // Evaluation instrumentation for training data collection
+        final long evalStart = System.currentTimeMillis();
+        final int[] evalCount = {0};
+
         FutureTask<SpellAbility> future = new FutureTask<>(() -> {
             //avoid ComputerUtil.aiLifeInDanger in loops as it slows down a lot.. call this outside loops will generally be fast...
             boolean isLifeInDanger = useLivingEnd && ComputerUtil.aiLifeInDanger(player, true, 0);
             for (final SpellAbility sa : ComputerUtilAbility.getOriginalAndAltCostAbilities(all, player)) {
+                evalCount[0]++;
+
                 // Don't add Counterspells to the "normal" playcard lookups
                 if (skipCounter && sa.getApi() == ApiType.Counter) {
                     continue;
@@ -1684,9 +1690,19 @@ public class AiController {
                 if (opinion != AiPlayDecision.WillPlay)
                     continue;
 
+                // Log slow evaluations for training data analysis
+                long evalMs = System.currentTimeMillis() - evalStart;
+                if (evalMs > 100) {
+                    System.out.println("AI_EVAL: evaluated=" + evalCount[0] + " timeMs=" + evalMs + " result=found card=" + sa.getHostCard().getName());
+                }
                 return sa;
             }
 
+            // Log slow evaluations that found nothing to play
+            long evalMs = System.currentTimeMillis() - evalStart;
+            if (evalMs > 100) {
+                System.out.println("AI_EVAL: evaluated=" + evalCount[0] + " timeMs=" + evalMs + " result=none");
+            }
             return null;
         });
 
@@ -1696,6 +1712,8 @@ public class AiController {
             // instead of computing all available concurrently just add a simple timeout depending on the user prefs
             return future.get(game.getAITimeout(), TimeUnit.SECONDS);
         } catch (InterruptedException | ExecutionException | TimeoutException e) {
+            long evalMs = System.currentTimeMillis() - evalStart;
+            System.out.println("AI_EVAL: evaluated=" + evalCount[0] + " timeMs=" + evalMs + " result=timeout aiTimeoutSec=" + game.getAITimeout());
             try {
                 e.printStackTrace();
                 t.stop();
