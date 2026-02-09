@@ -358,10 +358,6 @@ public class PlayerControllerAiObserver extends PlayerControllerAi {
         json.append(",\"power\":").append(c.isCreature() ? c.getNetPower() : 0);
         json.append(",\"toughness\":").append(c.isCreature() ? c.getNetToughness() : 0);
 
-        // Oracle text for mechanics parsing
-        json.append(",\"oracle_text\":\"").append(escapeString(
-            c.getOracleText() != null ? c.getOracleText() : "")).append("\"");
-
         json.append("}");
     }
 
@@ -387,10 +383,6 @@ public class PlayerControllerAiObserver extends PlayerControllerAi {
         // Power/toughness (0 for non-creatures)
         json.append(",\"power\":").append(c.isCreature() ? c.getNetPower() : 0);
         json.append(",\"toughness\":").append(c.isCreature() ? c.getNetToughness() : 0);
-
-        // Oracle text for mechanics parsing
-        json.append(",\"oracle_text\":\"").append(escapeString(
-            c.getOracleText() != null ? c.getOracleText() : "")).append("\"");
 
         // Battlefield-specific state
         json.append(",\"tapped\":").append(c.isTapped());
@@ -451,8 +443,6 @@ public class PlayerControllerAiObserver extends PlayerControllerAi {
             json.append("\"index\":").append(i);
             json.append(",\"card\":\"").append(escapeString(
                 sa.getHostCard() != null ? sa.getHostCard().getName() : "")).append("\"");
-            json.append(",\"description\":\"").append(escapeString(
-                sa.toString().length() > 100 ? sa.toString().substring(0, 100) : sa.toString())).append("\"");
             json.append(",\"is_land\":").append(sa.isLandAbility());
             json.append(",\"mana_cost\":\"").append(escapeString(
                 sa.getPayCosts() != null && sa.getPayCosts().getTotalMana() != null
@@ -462,7 +452,7 @@ public class PlayerControllerAiObserver extends PlayerControllerAi {
 
         // Add pass option
         if (!first) json.append(",");
-        json.append("{\"index\":-1,\"card\":\"\",\"description\":\"Pass priority\",\"is_land\":false,\"mana_cost\":\"\"}");
+        json.append("{\"index\":-1,\"card\":\"\",\"is_land\":false,\"mana_cost\":\"\"}");
 
         json.append("]");
     }
