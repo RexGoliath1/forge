@@ -9,14 +9,21 @@ permissions:
   contents: read
   packages: write
 
+env:
+  IMAGE: forge-daemon-base
+
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            platform: linux/amd64
+          - runner: ubuntu-24.04-arm
+            platform: linux/arm64
+    runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Set up QEMU (for multi-arch builds)
-        uses: docker/setup-qemu-action@v3
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -32,15 +39,50 @@ jobs:
         id: owner
         run: echo "name=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
-      - name: Build and push base image
+      - name: Platform slug (amd64 or arm64)
+        id: slug
+        run: echo "slug=$(echo '${{ matrix.platform }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
+      - name: Build and push per-platform image
         uses: docker/build-push-action@v6
         with:
           context: .
           file: Dockerfile.daemon-base
-          platforms: linux/amd64,linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
           tags: |
-            ghcr.io/${{ steps.owner.outputs.name }}/forge-daemon-base:${{ github.sha }}
-            ghcr.io/${{ steps.owner.outputs.name }}/forge-daemon-base:latest
-          cache-from: type=gha,scope=daemon-base
-          cache-to: type=gha,mode=max,scope=daemon-base
+            ghcr.io/${{ steps.owner.outputs.name }}/${{ env.IMAGE }}:${{ github.sha }}-${{ steps.slug.outputs.slug }}
+          cache-from: type=gha,scope=${{ env.IMAGE }}-${{ steps.slug.outputs.slug }}
+          cache-to: type=gha,mode=max,scope=${{ env.IMAGE }}-${{ steps.slug.outputs.slug }}
+
+  merge-manifest:
+    runs-on: ubuntu-latest
+    needs: [build]
+    steps:
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase owner for GHCR tags
+        id: owner
+        run: echo "name=$(echo '${{ github.repository_owner }}' | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
+
+      - name: Create and push multi-arch manifest
+        run: |
+          IMAGE="ghcr.io/${{ steps.owner.outputs.name }}/${{ env.IMAGE }}"
+
+          # Create manifest from per-platform images
+          docker manifest create "${IMAGE}:${{ github.sha }}" \
+            "${IMAGE}:${{ github.sha }}-linux-amd64" \
+            "${IMAGE}:${{ github.sha }}-linux-arm64"
+
+          docker manifest create "${IMAGE}:latest" \
+            "${IMAGE}:${{ github.sha }}-linux-amd64" \
+            "${IMAGE}:${{ github.sha }}-linux-arm64"
+
+          # Push both tags
+          docker manifest push "${IMAGE}:${{ github.sha }}"
+          docker manifest push "${IMAGE}:latest"
