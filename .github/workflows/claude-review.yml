@@ -1,7 +1,5 @@
 name: Claude PR Review
 
-# Auto-reviews on PR open/sync + on-demand when @claude is mentioned in a comment.
-# OAuth token bills to Max plan — no separate API charges.
 on:
   pull_request:
     types: [opened, synchronize]
@@ -14,7 +12,6 @@ on:
 
 jobs:
   claude-review:
-    # Run on PR open/sync or when @claude is mentioned in a comment
     if: |
       (github.event_name == 'pull_request') ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
@@ -37,31 +34,50 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-
+          show_full_output: false
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number || github.event.issue.number }}
 
-            Review this pull request for the Forge MTG engine (Java, Maven).
-            This is a fork used for RL training data collection.
+            You are a critical code reviewer for the forge project (Forge game engine for MTG simulation. Conventions: Java, Maven.).
+
+            YOUR JOB IS TO FIND PROBLEMS, NOT SUMMARIZE. Do not describe what the code does.
+
+            REVIEW CHECKLIST (in priority order):
+            1. BUGS: Logic errors, wrong math, inverted normals/winding, off-by-one, broken control flow
+            2. MAGIC NUMBERS: Every bare numeric literal (0.15, 4, 0.25, etc.) that lacks a named constant or comment explaining its origin. This is your #1 code quality check. Scan every line of the diff for unexplained numbers.
+            3. VALIDATION: Missing guards at function boundaries where bad inputs produce silent garbage (degenerate geometry, division by zero, empty collections)
+            4. INCONSISTENCIES: PR description vs actual changes, naming convention violations
+
+            Do NOT flag: style preferences, missing features (scope decisions belong in issues, not reviews), or things that work correctly as-is.
+
+            OUTPUT FORMAT — Use severity tiers:
+            ### BUG (must fix before merge)
+            Real defects that cause incorrect behavior.
+
+            ### MAGIC NUMBER (should fix)
+            Unexplained numeric literals. For each: state the value, the line, and ask what it represents.
+
+            ### SUGGESTION (nice to have)
+            Defensive improvements, documentation gaps. Clearly mark as non-blocking.
+
+            If the code is clean, say "LGTM — no issues found." Do NOT pad with praise.
+
+            RULES FOR POSTING:
+            - Use the Write tool to write your review to /tmp/review.md
+            - Post with: gh pr comment ${{ github.event.pull_request.number || github.event.issue.number }} --body-file /tmp/review.md
+            - NEVER put multi-line text in --body (causes bash permission denials)
 
             Workflow:
             1. Run `gh pr diff ${{ github.event.pull_request.number || github.event.issue.number }}` to read the diff
-            2. Analyze the changes for bugs, security issues, and consistency
-            3. Post your review using `gh pr comment ${{ github.event.pull_request.number || github.event.issue.number }}` with your findings
-            4. Use `mcp__github_inline_comment__create_inline_comment` for line-specific feedback
+            2. Scan EVERY numeric literal in the diff. Ask: is this explained by a constant name, comment, or obvious context (0, 1, 2 for indexing are fine)? If not, flag it.
+            3. Check for logic bugs — especially game rule implementations, state management, and API contracts
+            4. Write review to /tmp/review.md using the severity tiers above, then post with --body-file
 
             Do NOT explore the broader codebase or run tests. Focus on the diff.
-
-            Key custom files:
-            - ForgeDaemon.java: TCP daemon for AI game simulation
-            - PlayerControllerAiObserver.java: Observation mode (AI plays, streams decisions)
-            - LobbyPlayerAiObserver.java: Lobby player for observation mode
-
-            Format: blockers, suggestions, approvals. Keep it concise.
-            Only post GitHub comments — don't submit review text as messages.
+            Do NOT use gh pr checkout — read the diff directly.
 
           claude_args: |
-            --model claude-sonnet-4-5-20250929
-            --max-turns 25
-            --allowedTools "mcp__github_inline_comment__create_inline_comment,Bash(gh pr comment *),Bash(gh pr diff *),Bash(gh pr view *),Bash(gh api *),Read,Glob,Grep"
+            --model claude-sonnet-4-6
+            --max-turns 15
+            --allowedTools "Write,Bash(gh pr comment *),Bash(gh pr diff *),Bash(gh pr view *),Bash(gh api *),Read,Glob,Grep"
